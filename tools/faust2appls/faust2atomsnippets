@@ -45,10 +45,7 @@ import sys, re, datetime, string, getopt
 # Outdent a comment line by n characters in
 # order to remove the prefix "//   "
 def outdent(line, n):
-	if len(line) <= n:
-		return "\n"
-	else:
-		return line[n:]
+	return "\n" if len(line) <= n else line[n:]
 
 # Match the 2-characters prefix of a library.
 # We want to extract "no" from "...prefix is `no`..."
@@ -96,26 +93,20 @@ def matchEndComment(line):
 # that is the position of the first word character
 # after "//   "
 def indentation(line):
-	matchComment = re.search(r'(^\s*//\s*\w)', line)
-	if matchComment:
-		return len(matchComment.group(1))-1
+	if matchComment := re.search(r'(^\s*//\s*\w)', line):
+		return len(matchComment[1]) - 1
 	else:
 		return 0
 
 # Indicates if a line is a comment
 def isComment(line):
-	matchComment = re.search(r'^\s*//', line)
-	if matchComment:
-		return 1
-	else:
-		return 0
+	return 1 if (matchComment := re.search(r'^\s*//', line)) else 0
 
 # Measure the indentation of a md-comment line
 # that is the len of the prefix '//   '
 def indentation(line):
-	matchComment = re.search(r'(^\s*//\s*\w)', line)
-	if matchComment:
-		return len(matchComment.group(1))-1
+	if matchComment := re.search(r'(^\s*//\s*\w)', line):
+		return len(matchComment[1]) - 1
 	else:
 		return 0
 

@@ -81,11 +81,12 @@ def pointInBBox( pt, bbox ):
 	'''
 
 	# if ( x < xmin ) or ( x > xmax ) or ( y < ymin ) or ( y > ymax )
-	if ( pt[0] < bbox[0] ) or ( pt[0] > bbox[1] ) or \
-		( pt[1] < bbox[2] ) or ( pt[1] > bbox[3] ):
-		return False
-	else:
-		return True
+	return (
+		pt[0] >= bbox[0]
+		and pt[0] <= bbox[1]
+		and pt[1] >= bbox[2]
+		and pt[1] <= bbox[3]
+	)
 
 def bboxInBBox( bbox1, bbox2 ):
 
@@ -101,11 +102,12 @@ def bboxInBBox( bbox1, bbox2 ):
 
 	# if ( xmin1 < xmin2 ) or ( xmax1 > xmax2 ) or ( ymin1 < ymin2 ) or ( ymax1 > ymax2 )
 
-	if ( bbox1[0] < bbox2[0] ) or ( bbox1[1] > bbox2[1] ) or \
-		( bbox1[2] < bbox2[2] ) or ( bbox1[3] > bbox2[3] ):
-		return False
-	else:
-		return True
+	return (
+		bbox1[0] >= bbox2[0]
+		and bbox1[1] <= bbox2[1]
+		and bbox1[2] >= bbox2[2]
+		and bbox1[3] <= bbox2[3]
+	)
 
 def pointInPoly( p, poly, bbox=None ):
 
@@ -119,9 +121,8 @@ def pointInPoly( p, poly, bbox=None ):
 		return False
 
 	# Check to see if the point lies outside the polygon's bounding box
-	if not bbox is None:
-		if not pointInBBox( p, bbox ):
-			return False
+	if bbox is not None and not pointInBBox(p, bbox):
+		return False
 
 	# Check to see if the point is a vertex
 	if p in poly:
@@ -147,15 +148,13 @@ def pointInPoly( p, poly, bbox=None ):
 	p1_x,p1_y = poly[0]
 	for i in range( n + 1 ):
 		p2_x,p2_y = poly[i % n]
-		if y > min( p1_y, p2_y ):
-			if y <= max( p1_y, p2_y ):
-				if x <= max( p1_x, p2_x ):
-					if p1_y != p2_y:
-						intersect = p1_x + (y - p1_y) * (p2_x - p1_x) / (p2_y - p1_y)
-						if x <= intersect:
-							inside = not inside
-					else:
-						inside = not inside
+		if y > min(p1_y, p2_y) and y <= max(p1_y, p2_y) and x <= max(p1_x, p2_x):
+			if p1_y != p2_y:
+				intersect = p1_x + (y - p1_y) * (p2_x - p1_x) / (p2_y - p1_y)
+				if x <= intersect:
+					inside = not inside
+			else:
+				inside = not inside
 		p1_x,p1_y = p2_x,p2_y
 
 	return inside
@@ -176,20 +175,10 @@ def polyInPoly( poly1, bbox1, poly2, bbox2 ):
 	# See if poly1's bboundin box is NOT contained by poly2's bounding box
 	# if it isn't, then poly1 cannot be contained by poly2.
 
-	if ( not bbox1 is None ) and ( not bbox2 is None ):
-		if not bboxInBBox( bbox1, bbox2 ):
-			return False
+	if bbox1 is not None and bbox2 is not None and not bboxInBBox(bbox1, bbox2):
+		return False
 
-	# To see if poly1 is contained by poly2, we need to ensure that each
-	# vertex of poly1 lies on or within poly2
-
-	for p in poly1:
-		if not pointInPoly( p, poly2, bbox2 ):
-			return False
-
-	# Looks like poly1 is contained on or in Poly2
-
-	return True
+	return all(pointInPoly( p, poly2, bbox2 ) for p in poly1)
 
 def subdivideCubicPath( sp, flat, i=1 ):
 
@@ -239,9 +228,15 @@ class OpenSCAD( inkex.Effect ):
 			dest="tab", default="splash",
 			help="The active tab when Apply was pressed" )
 
-		self.OptionParser.add_option('--smoothness', dest='smoothness',
-			type='float', default=float( 0.2 ), action='store',
-			help='Curve smoothing (less for more)' )
+		self.OptionParser.add_option(
+			'--smoothness',
+			dest='smoothness',
+			type='float',
+			default=0.2,
+			action='store',
+			help='Curve smoothing (less for more)',
+		)
+
 
 		self.OptionParser.add_option('--height', dest='height',
 			type='string', default='5', action='store',
@@ -278,7 +273,7 @@ class OpenSCAD( inkex.Effect ):
 
 		# Output file handling
 		self.call_list = []
-		self.pathid    = int( 0 )
+		self.pathid = 0
 
 		# Output file
 		self.f = None
@@ -305,36 +300,34 @@ class OpenSCAD( inkex.Effect ):
 		Note that SVG defines 90 px = 1 in = 25.4 mm.
 		'''
 
-		str = self.document.getroot().get( name )
-		if str:
-			v, u = parseLengthWithUnits( str )
-			if not v:
-				# Couldn't parse the value
-				return None
-			elif ( u == 'mm' ):
-				return float( v ) * ( 90.0 / 25.4 )
-			elif ( u == 'cm' ):
-				return float( v ) * ( 90.0 * 10.0 / 25.4 )
-			elif ( u == 'm' ):
-				return float( v ) * ( 90.0 * 1000.0 / 25.4 )
-			elif ( u == 'in' ):
-				return float( v ) * 90.0
-			elif ( u == 'ft' ):
-				return float( v ) * 12.0 * 90.0
-			elif ( u == 'pt' ):
-				# Use modern "Postscript" points of 72 pt = 1 in instead
-				# of the traditional 72.27 pt = 1 in
-				return float( v ) * ( 90.0 / 72.0 )
-			elif ( u == 'pc' ):
-				return float( v ) * ( 90.0 / 6.0 )
-			elif ( u == 'px' ):
-				return float( v )
-			else:
-				# Unsupported units
-				return None
-		else:
+		if not (str := self.document.getroot().get(name)):
 			# No width specified; assume the default value
 			return float( default )
+		v, u = parseLengthWithUnits( str )
+		if not v:
+			# Couldn't parse the value
+			return None
+		elif ( u == 'mm' ):
+			return float( v ) * ( 90.0 / 25.4 )
+		elif ( u == 'cm' ):
+			return float( v ) * ( 90.0 * 10.0 / 25.4 )
+		elif ( u == 'm' ):
+			return float( v ) * ( 90.0 * 1000.0 / 25.4 )
+		elif ( u == 'in' ):
+			return float( v ) * 90.0
+		elif ( u == 'ft' ):
+			return float( v ) * 12.0 * 90.0
+		elif ( u == 'pt' ):
+			# Use modern "Postscript" points of 72 pt = 1 in instead
+			# of the traditional 72.27 pt = 1 in
+			return float( v ) * ( 90.0 / 72.0 )
+		elif ( u == 'pc' ):
+			return float( v ) * ( 90.0 / 6.0 )
+		elif ( u == 'px' ):
+			return float( v )
+		else:
+			# Unsupported units
+			return None
 
 	def getDocProps( self ):
 
@@ -346,10 +339,7 @@ class OpenSCAD( inkex.Effect ):
 
 		self.docHeight = self.getLength( 'height', DEFAULT_HEIGHT )
 		self.docWidth = self.getLength( 'width', DEFAULT_WIDTH )
-		if ( self.docHeight == None ) or ( self.docWidth == None ):
-			return False
-		else:
-			return True
+		return self.docHeight is not None and self.docWidth is not None
 
 	def handleViewBox( self ):
 
@@ -358,8 +348,7 @@ class OpenSCAD( inkex.Effect ):
 		'''
 
 		if self.getDocProps():
-			viewbox = self.document.getroot().get( 'viewBox' )
-			if viewbox:
+			if viewbox := self.document.getroot().get('viewBox'):
 				vinfo = viewbox.strip().replace( ',', ' ' ).split( ' ' )
 				if ( vinfo[2] != 0 ) and ( vinfo[3] != 0 ):
 					sx = self.docWidth / float( vinfo[2] )
@@ -405,12 +394,11 @@ class OpenSCAD( inkex.Effect ):
 			if len( subpath_vertices ):
 				subpath_list.append( [ subpath_vertices, [ sp_xmin, sp_xmax, sp_ymin, sp_ymax ] ] )
 
-			subpath_vertices = []
 			subdivideCubicPath( sp, float( self.options.smoothness ) )
 
 			# Note the first point of the subpath
 			first_point = sp[0][1]
-			subpath_vertices.append( first_point )
+			subpath_vertices = [first_point]
 			sp_xmin = first_point[0]
 			sp_xmax = first_point[0]
 			sp_ymin = first_point[1]
@@ -422,7 +410,7 @@ class OpenSCAD( inkex.Effect ):
 			n = len( sp )
 			last_point = sp[n-1][1]
 			if ( first_point[0] == last_point[0] ) and ( first_point[1] == last_point[1] ):
-				n = n - 1
+				n -= 1
 
 			# Traverse each point of the subpath
 			for csp in sp[1:n]:
@@ -456,7 +444,7 @@ class OpenSCAD( inkex.Effect ):
 		if len( subpath_vertices ):
 			subpath_list.append( [ subpath_vertices, [ sp_xmin, sp_xmax, sp_ymin, sp_ymax ] ] )
 
-		if len( subpath_list ) > 0:
+		if subpath_list:
 			self.paths[node] = subpath_list
 
 	def convertPath( self, node ):
@@ -467,10 +455,10 @@ class OpenSCAD( inkex.Effect ):
 
 		# Determine which polys contain which
 
-		contains     = [ [] for i in xrange( len( path ) ) ]
-		contained_by = [ [] for i in xrange( len( path ) ) ]
+		contains = [[] for _ in xrange( len( path ) )]
+		contained_by = [[] for _ in xrange( len( path ) )]
 
-		for i in range( 0, len( path ) ):
+		for i in range(len( path )):
 			for j in range( i + 1, len( path ) ):
 				if polyInPoly( path[j][0], path[j][1], path[i][0], path[i][1] ):
 					# subpath i contains subpath j
@@ -486,22 +474,30 @@ class OpenSCAD( inkex.Effect ):
 		# Generate an OpenSCAD module for this path
 		id = node.get ( 'id', '' )
 		if ( id is None ) or ( id == '' ):
-			id = str( self.pathid ) + 'x'
+			id = f'{str(self.pathid)}x'
 			self.pathid += 1
 		else:
 			id = re.sub( '[^A-Za-z0-9_]+', '', id )
-		self.f.write( 'module ' + self.options.modname + '()\n{\n' )
+		self.f.write(f'module {self.options.modname}' + '()\n{\n')
 		if self.options.extype == 0:
 			self.f.write( '  scale([25.4/90, -25.4/90, 1])\n  {\n' )
 		elif self.options.extype == 1:
-			self.f.write( '  linear_extrude(' + self.options.height + ') scale([25.4/90, -25.4/90, 1])\n  {\n' )
+			self.f.write(
+				f'  linear_extrude({self.options.height}'
+				+ ') scale([25.4/90, -25.4/90, 1])\n  {\n'
+			)
+
 		elif self.options.extype == 2:
-			self.f.write( '  rotate_extrude($fn=' + self.options.facets + ') scale([25.4/90, -25.4/90, 1])\n  {\n' )
+			self.f.write(
+				f'  rotate_extrude($fn={self.options.facets}'
+				+ ') scale([25.4/90, -25.4/90, 1])\n  {\n'
+			)
+
 
 		# And add the call to the call list
 		self.call_list.append( '%s();\n' % self.options.modname )
 
-		for i in range( 0, len( path ) ):
+		for i in range(len( path )):
 
 			# Skip this subpath if it is contained by another one
 			if len( contained_by[i] ) != 0:
@@ -514,7 +510,7 @@ class OpenSCAD( inkex.Effect ):
 
 				# This subpath does not contain any subpaths
 				poly = \
-					'      polygon(['
+						'      polygon(['
 
 				for point in subpath:
 					poly += '[%f,%f],' % ( ( point[0] - self.cx ), ( point[1] - self.cy ) )
@@ -528,10 +524,10 @@ class OpenSCAD( inkex.Effect ):
 
 				# This subpath contains other subpaths
 				poly = \
-					'    difference()\n' + \
-					'    {\n' + \
-					'       linear_extrude(height=h)\n' + \
-					'         polygon(['
+						'    difference()\n' + \
+						'    {\n' + \
+						'       linear_extrude(height=h)\n' + \
+						'         polygon(['
 
 				for point in subpath:
 					poly += '[%f,%f],' % ( ( point[0] - self.cx ), ( point[1] - self.cy ) )
@@ -543,9 +539,9 @@ class OpenSCAD( inkex.Effect ):
 				for j in contains[i]:
 
 					poly = \
-						'       translate([0, 0, -fudge])\n' + \
-						'         linear_extrude(height=h+2*fudge)\n' + \
-						'           polygon(['
+							'       translate([0, 0, -fudge])\n' + \
+							'         linear_extrude(height=h+2*fudge)\n' + \
+							'           polygon(['
 
 					for point in path[j][0]:
 						poly += '[%f,%f],' % ( ( point[0] - self.cx ), ( point[1] - self.cy ) )
